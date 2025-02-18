@@ -1,92 +1,165 @@
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP, AES
-from Crypto.Util.Padding import pad, unpad  # Import padding utilities
-from Crypto.Random import get_random_bytes
-import base64
 import random
+import base64
+import hashlib
+from Crypto.Random import get_random_bytes  # Allowed for randomness
 
-# Step 1: RSA Key Generation (Public & Private Keys)
+# ----------------- Manual RSA Implementation ----------------- #
+def is_prime(n, k=5):  # Miller-Rabin Primality Test
+    if n < 2:
+        return False
+    for _ in range(k):
+        a = random.randint(2, n - 2)
+        if pow(a, n - 1, n) != 1:
+            return False
+    return True
+
+def generate_prime(bits=512):
+    while True:
+        p = random.getrandbits(bits)
+        if is_prime(p):
+            return p
+
+def gcd(a, b):
+    while b:
+        a, b = b, a % b
+    return a
+
+def mod_inverse(e, phi):
+    # Extended Euclidean Algorithm to find modular inverse
+    a, b, x0, x1 = phi, e, 0, 1
+    while b:
+        q = a // b
+        a, b = b, a % b
+        x0, x1 = x1, x0 - q * x1
+    return x0 % phi
+
 def generate_rsa_keys():
-    key = RSA.generate(2048)  # Generate 2048-bit RSA key
-    private_key = key.export_key()
-    public_key = key.publickey().export_key()
-    return private_key, public_key
+    p, q = generate_prime(), generate_prime()
+    n = p * q
+    phi = (p - 1) * (q - 1)
 
-# Generate RSA Key Pairs for Person A & B
-private_key_A, public_key_A = generate_rsa_keys()
-private_key_B, public_key_B = generate_rsa_keys()
+    e = 65537  # Common public exponent
+    while gcd(e, phi) != 1:
+        e = random.randint(2, phi - 1)
 
-# Step 2: AES Key Generation
-def generate_aes_key():
-    return get_random_bytes(32)  # 256-bit AES key
+    d = mod_inverse(e, phi)
+    
+    return (e, n), (d, n)  # Public Key, Private Key
 
-# Step 3: Securely Exchange AES Key using RSA
-def encrypt_aes_key(aes_key, public_key):
-    rsa_key = RSA.import_key(public_key)
-    cipher_rsa = PKCS1_OAEP.new(rsa_key)
-    encrypted_key = cipher_rsa.encrypt(aes_key)
-    return encrypted_key
+def rsa_encrypt(message, key):
+    e, n = key
+    numeric_message = int.from_bytes(message.encode(), 'big')
+    return pow(numeric_message, e, n)
 
-def decrypt_aes_key(encrypted_key, private_key):
-    rsa_key = RSA.import_key(private_key)
-    cipher_rsa = PKCS1_OAEP.new(rsa_key)
-    decrypted_key = cipher_rsa.decrypt(encrypted_key)
-    return decrypted_key
+def rsa_decrypt(ciphertext, key):
+    d, n = key
+    numeric_message = pow(ciphertext, d, n)
+    return numeric_message.to_bytes((numeric_message.bit_length() + 7) // 8, 'big').decode()
 
-# Person A generates AES key and encrypts it using Person B's public key
-aes_key = generate_aes_key()
-encrypted_aes_key = encrypt_aes_key(aes_key, public_key_B)
+# Generate keys for Person A and B
+public_key_A, private_key_A = generate_rsa_keys()
+public_key_B, private_key_B = generate_rsa_keys()
 
-# Person B decrypts AES key using their private key
-decrypted_aes_key = decrypt_aes_key(encrypted_aes_key, private_key_B)
+# ----------------- Manual AES CBC Implementation ----------------- #
+BLOCK_SIZE = 16  # AES block size
 
-# Ensure the key is correctly exchanged
+def pad(plaintext):
+    pad_length = BLOCK_SIZE - (len(plaintext) % BLOCK_SIZE)
+    return plaintext + chr(pad_length) * pad_length  # PKCS7 Padding
+
+def unpad(padded_text):
+    pad_length = ord(padded_text[-1])
+    return padded_text[:-pad_length]
+
+def xor_bytes(a, b):
+    return bytes(x ^ y for x, y in zip(a, b))
+
+# Manual AES-like S-Box transformation (simplified version)
+def simple_sbox(byte_block):
+    return bytes((b + 17) % 256 for b in byte_block)  # Simple non-linear substitution
+
+def simple_inverse_sbox(byte_block):
+    return bytes((b - 17) % 256 for b in byte_block)  # Reverse substitution
+
+def aes_encrypt_block(block, key):
+    """AES-like encryption: XOR with key + substitution."""
+    xored = xor_bytes(block, key)
+    substituted = simple_sbox(xored)  # Apply S-Box
+    return substituted
+
+def aes_decrypt_block(block, key):
+    """AES-like decryption: Reverse S-Box + XOR with key."""
+    reversed_substitution = simple_inverse_sbox(block)
+    original_block = xor_bytes(reversed_substitution, key)
+    return original_block
+
+def aes_encrypt(plaintext, key, iv):
+    plaintext = pad(plaintext)
+    blocks = [plaintext[i:i+BLOCK_SIZE].encode() for i in range(0, len(plaintext), BLOCK_SIZE)]
+    encrypted_blocks = []
+    prev_block = iv
+
+    for block in blocks:
+        xored = xor_bytes(block, prev_block)
+        encrypted_block = aes_encrypt_block(xored, key)
+        encrypted_blocks.append(encrypted_block)
+        prev_block = encrypted_block  # CBC chaining
+
+    return base64.b64encode(iv + b''.join(encrypted_blocks)).decode()
+
+def aes_decrypt(ciphertext, key):
+    raw_data = base64.b64decode(ciphertext)
+    iv, encrypted_blocks = raw_data[:BLOCK_SIZE], raw_data[BLOCK_SIZE:]
+    decrypted_blocks = []
+    prev_block = iv
+
+    for i in range(0, len(encrypted_blocks), BLOCK_SIZE):
+        block = encrypted_blocks[i:i+BLOCK_SIZE]
+        decrypted_block = aes_decrypt_block(block, key)
+        original_block = xor_bytes(decrypted_block, prev_block)
+        decrypted_blocks.append(original_block)
+        prev_block = block  # CBC chaining
+
+    return unpad(b''.join(decrypted_blocks).decode())
+
+# ----------------- Key Exchange ----------------- #
+# Generate AES Key
+aes_key = get_random_bytes(16)
+iv = get_random_bytes(16)
+
+# Encrypt AES Key with RSA (Person A to B)
+encrypted_aes_key = rsa_encrypt(aes_key.hex(), public_key_B)
+
+# Decrypt AES Key with RSA (Person B)
+decrypted_aes_key = bytes.fromhex(rsa_decrypt(encrypted_aes_key, private_key_B))
+
+# Ensure key exchange was successful
 assert aes_key == decrypted_aes_key, "AES key exchange failed!"
 
-# Step 4: AES Encryption and Decryption (Fixed)
-def encrypt_message(plaintext, aes_key):
-    cipher = AES.new(aes_key, AES.MODE_CBC)  # AES in CBC mode
-    iv = cipher.iv  # Initialization Vector
-    padded_text = pad(plaintext.encode(), AES.block_size)  # Proper padding
-    ciphertext = cipher.encrypt(padded_text)
-    return base64.b64encode(iv + ciphertext).decode()  # Store IV + ciphertext
-
-def decrypt_message(ciphertext, aes_key):
-    raw_data = base64.b64decode(ciphertext)
-    iv = raw_data[:16]  # Extract IV
-    cipher_text = raw_data[16:]
-    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
-    try:
-        decrypted_text = unpad(cipher.decrypt(cipher_text), AES.block_size).decode()  # Remove padding safely
-        return decrypted_text
-    except ValueError:
-        print("Warning: Padding error detected! Decryption may be corrupted.")
-        return "(Decryption failed due to padding error)"
-
-# Example usage
+# ----------------- AES Encryption & Decryption ----------------- #
 message = "Hello, Secure World!"
-ciphertext = encrypt_message(message, decrypted_aes_key)
-decrypted_message = decrypt_message(ciphertext, decrypted_aes_key)
+ciphertext = aes_encrypt(message, aes_key, iv)
+decrypted_message = aes_decrypt(ciphertext, aes_key)
 
-# Ensure the message is correctly encrypted and decrypted
 assert message == decrypted_message, "Decryption failed!"
 print(f"Original: {message}")
 print(f"Encrypted: {ciphertext}")
 print(f"Decrypted: {decrypted_message}")
 
-# Step 5: Simulating Bit Errors in Ciphertext
+# ----------------- Bit Error Simulation ----------------- #
 def introduce_bit_errors(ciphertext, num_errors=1):
     raw_data = bytearray(base64.b64decode(ciphertext))
     
     for _ in range(num_errors):
-        index = random.randint(0, len(raw_data) - 1)  # Choose random byte to flip
-        raw_data[index] ^= 0x01  # Flip a bit (XOR with 1)
+        index = random.randint(0, len(raw_data) - 1)
+        raw_data[index] ^= 0x01  # Flip a bit
 
     return base64.b64encode(raw_data).decode()
 
-# Introduce bit error in ciphertext
 corrupted_ciphertext = introduce_bit_errors(ciphertext, num_errors=1)
-
 print("\n--- After Bit Errors ---")
-decrypted_corrupted_message = decrypt_message(corrupted_ciphertext, decrypted_aes_key)
-print(f"Decrypted (with errors): {decrypted_corrupted_message}")
+try:
+    decrypted_corrupted_message = aes_decrypt(corrupted_ciphertext, aes_key)
+    print(f"Decrypted (with errors): {decrypted_corrupted_message}")
+except Exception as e:
+    print("Decryption failed due to bit errors!")
