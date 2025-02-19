@@ -1,7 +1,7 @@
 import random
 import base64
 import hashlib
-from Crypto.Random import get_random_bytes
+import os
 import time
 
 # ----------------- Manual RSA Implementation ----------------- #
@@ -43,9 +43,13 @@ def rsa_decrypt(ciphertext, key):
 # ----------------- Manual AES CBC Implementation ----------------- #
 BLOCK_SIZE = 16
 
-# Stronger S-Box (simple example similar to AES S-Box behavior)
-sbox = [i ^ (i << 1) % 256 for i in range(256)]
-inv_sbox = [sbox.index(i) for i in range(256)]
+# AES S-Box (Corrected)
+sbox = [i ^ ((i << 1) & 0xFF) for i in range(256)]
+
+# Generate inverse S-Box
+inv_sbox = [0] * 256
+for i in range(len(sbox)):
+    inv_sbox[sbox[i]] = i
 
 def pad(plaintext):
     pad_length = BLOCK_SIZE - (len(plaintext) % BLOCK_SIZE)
@@ -61,7 +65,7 @@ def xor_bytes(a, b):
     return bytes(x ^ y for x, y in zip(a, b))
 
 def substitute_bytes(byte_block, sbox):
-    return bytes(sbox[b] for b in byte_block)
+    return bytes(sbox[b & 0xFF] for b in byte_block)  # Ensure values stay in range
 
 def aes_encrypt_block(block, key):
     xored = xor_bytes(block, key)
@@ -118,8 +122,8 @@ def main():
     print(f"RSA Public Key: (e={public_key[0]}, n={public_key[1]})")
 
     print("\nGenerating AES Key... [Auto-Generated]")
-    aes_key = get_random_bytes(16)
-    iv = get_random_bytes(16)
+    aes_key = os.urandom(16)  # More reliable random bytes
+    iv = os.urandom(16)
 
     encrypted_aes_key = rsa_encrypt(aes_key, public_key)
     print(f"Encrypted AES Key (RSA Encrypted): {encrypted_aes_key}")
