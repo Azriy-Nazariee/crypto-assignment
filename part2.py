@@ -31,7 +31,7 @@ def generate_rsa_keys():
 
 def rsa_encrypt(message, key):
     e, n = key
-    numeric_message = int.from_bytes(message, 'big')  # Ensure it's bytes, not string
+    numeric_message = int.from_bytes(message, 'big') 
     return pow(numeric_message, e, n)
 
 def rsa_decrypt(ciphertext, key):
@@ -88,7 +88,7 @@ def key_expansion(key):
     
     return [expanded_key[i:i+16] for i in range(0, len(expanded_key), 16)]
 
-# S-Box and Inverse S-Box
+# The predefined S-Box and Inverse S-Box values as in the table
 sbox = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -127,11 +127,11 @@ inv_sbox = [
     0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d
 ]
 
-# Encryption Steps ------------------------------------------------------------------
+# 3) Encryption Steps
 
-# Step 1: Substitute Bytes
+# Step 1: Substitute Bytes - use S-Box
 def substitute_bytes(byte_block, sbox):
-    return bytes(sbox[b] for b in byte_block)  # Corrected to match S-Box
+    return bytes(sbox[b] for b in byte_block)  
 
 # Step 2: Shift Rows
 def shift_rows(state):
@@ -176,9 +176,9 @@ def mix_columns(state):
 def add_round_key(state, key):
     return xor_bytes(state, key)
 
-# Decryption Steps -----------------------------------------------------------------
+# 4) Decryption Steps
 
-# Step 1 : Inverse Substitute Bytes
+# Step 1 : Inverse Substitute Bytes - use Inverse S-Box
 def inv_substitute_bytes(byte_block, inv_sbox):
     return bytes(inv_sbox[b] for b in byte_block)
 
@@ -206,7 +206,7 @@ def inv_mix_columns(state):
         ]
     return bytes(mixed)
 
-# AES Encryption and Decryption Rounds ------------------------------------------------
+# 5) AES Encryption and Decryption Rounds 
 
 def aes_encrypt_block(block, key):
     round_keys = key_expansion(key)
@@ -242,7 +242,7 @@ def aes_decrypt_block(block, key):
 
     return state
 
-# AES Encryption and Decryption Functions -------------------------------------------
+# 6) AES Encryption and Decryption Functions 
 def aes_encrypt(plaintext, key, iv):
     plaintext = pad(plaintext)
     blocks = [plaintext[i:i+BLOCK_SIZE].encode() for i in range(0, len(plaintext), BLOCK_SIZE)]
@@ -287,7 +287,7 @@ def person_a():
     plaintext = input("\n[Person A] Enter message to send securely: ")
 
     print("\n[Person A] Generating AES Key... [Auto-Generated]")
-    aes_key = os.urandom(16)  # Generate a secure AES key
+    aes_key = os.urandom(16)  # Generate a random AES key
     iv = os.urandom(16)
 
     encrypted_aes_key = rsa_encrypt(aes_key, public_key)
