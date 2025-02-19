@@ -20,44 +20,32 @@ def generate_prime(bits=512):
         if is_prime(p):
             return p
 
-def gcd(a, b):
-    while b:
-        a, b = b, a % b
-    return a
-
-def mod_inverse(e, phi):
-    a, b, x0, x1 = phi, e, 0, 1
-    while b:
-        q = a // b
-        a, b = b, a % b
-        x0, x1 = x1, x0 - q * x1
-    return x0 % phi
-
 def generate_rsa_keys():
     p, q = generate_prime(), generate_prime()
     n = p * q
     phi = (p - 1) * (q - 1)
-
+    
     e = 65537
-    while gcd(e, phi) != 1:
-        e = random.randint(2, phi - 1)
-
-    d = mod_inverse(e, phi)
+    d = pow(e, -1, phi)
     
     return (e, n), (d, n)
 
 def rsa_encrypt(message, key):
     e, n = key
-    numeric_message = int.from_bytes(message.encode(), 'big')
+    numeric_message = int.from_bytes(message, 'big')  # Ensure it's bytes, not string
     return pow(numeric_message, e, n)
 
 def rsa_decrypt(ciphertext, key):
     d, n = key
     numeric_message = pow(ciphertext, d, n)
-    return numeric_message.to_bytes((numeric_message.bit_length() + 7) // 8, 'big').decode()
+    return numeric_message.to_bytes((numeric_message.bit_length() + 7) // 8, 'big')
 
 # ----------------- Manual AES CBC Implementation ----------------- #
 BLOCK_SIZE = 16
+
+# Stronger S-Box (simple example similar to AES S-Box behavior)
+sbox = [i ^ (i << 1) % 256 for i in range(256)]
+inv_sbox = [sbox.index(i) for i in range(256)]
 
 def pad(plaintext):
     pad_length = BLOCK_SIZE - (len(plaintext) % BLOCK_SIZE)
@@ -65,24 +53,23 @@ def pad(plaintext):
 
 def unpad(padded_text):
     pad_length = ord(padded_text[-1])
+    if pad_length > BLOCK_SIZE:
+        raise ValueError("Invalid padding detected")
     return padded_text[:-pad_length]
 
 def xor_bytes(a, b):
     return bytes(x ^ y for x, y in zip(a, b))
 
-def simple_sbox(byte_block):
-    return bytes((b + 17) % 256 for b in byte_block)
-
-def simple_inverse_sbox(byte_block):
-    return bytes((b - 17) % 256 for b in byte_block)
+def substitute_bytes(byte_block, sbox):
+    return bytes(sbox[b] for b in byte_block)
 
 def aes_encrypt_block(block, key):
     xored = xor_bytes(block, key)
-    substituted = simple_sbox(xored)
+    substituted = substitute_bytes(xored, sbox)
     return substituted
 
 def aes_decrypt_block(block, key):
-    reversed_substitution = simple_inverse_sbox(block)
+    reversed_substitution = substitute_bytes(block, inv_sbox)
     original_block = xor_bytes(reversed_substitution, key)
     return original_block
 
@@ -115,25 +102,6 @@ def aes_decrypt(ciphertext, key):
 
     return unpad(b''.join(decrypted_blocks).decode())
 
-# ----------------- Error Bit Introduction ----------------- #
-def introduce_error_bit(ciphertext_b64):
-    raw_ciphertext = base64.b64decode(ciphertext_b64)
-    ciphertext_bytes = bytearray(raw_ciphertext)
-
-    error_byte_index = random.randint(BLOCK_SIZE, len(ciphertext_bytes) - 1)
-    error_bit_position = random.randint(0, 7)
-    
-    ciphertext_bytes[error_byte_index] ^= (1 << error_bit_position)  # Flip a bit
-
-    corrupted_ciphertext_b64 = base64.b64encode(ciphertext_bytes).decode()
-
-    print("\nError Bit Introduced!")
-    print(f"Byte Index: {error_byte_index}, Bit Position: {error_bit_position} flipped.")
-    print(f"Original Encrypted Text: {ciphertext_b64}")
-    print(f"Corrupted Encrypted Text: {corrupted_ciphertext_b64}\n")
-
-    return corrupted_ciphertext_b64
-
 # ----------------- Terminal Interface ----------------- #
 def display_header():
     print("---------------------------------------------------------")
@@ -153,7 +121,7 @@ def main():
     aes_key = get_random_bytes(16)
     iv = get_random_bytes(16)
 
-    encrypted_aes_key = rsa_encrypt(aes_key.hex(), public_key)
+    encrypted_aes_key = rsa_encrypt(aes_key, public_key)
     print(f"Encrypted AES Key (RSA Encrypted): {encrypted_aes_key}")
 
     print("\nEncrypting Message using AES...")
@@ -161,18 +129,14 @@ def main():
     ciphertext = aes_encrypt(plaintext, aes_key, iv)
     encryption_time = time.time() - start_time
 
-    # Ask user if they want to introduce an error bit
-    introduce_error = input("\nDo you want to introduce an error bit in the ciphertext? (y/n): ").strip().lower()
-    if introduce_error == 'y':
-        ciphertext = introduce_error_bit(ciphertext)
-
     print("\nDecrypting ciphertext...")
     start_time = time.time()
+    decrypted_aes_key = rsa_decrypt(encrypted_aes_key, private_key)
 
     try:
-        decrypted_text = aes_decrypt(ciphertext, aes_key)
+        decrypted_text = aes_decrypt(ciphertext, decrypted_aes_key)
         decryption_time = time.time() - start_time
-        print("\nDecryption successful but message may be corrupted.")
+        print("\nDecryption successful.")
         print(f"Expected: \"{plaintext}\"")
         print(f"Received: \"{decrypted_text}\"")
     except Exception as e:
@@ -180,8 +144,8 @@ def main():
         print("\nDecryption failed: Data corruption detected.")
         print(f"Error: {e}")
 
-    print(f"\nEncryption Time: {encryption_time:.2f}s")
-    print(f"Decryption Time: {decryption_time:.2f}s")
+    print(f"\nEncryption Time: {encryption_time:.4f}s")
+    print(f"Decryption Time: {decryption_time:.4f}s")
     print("---------------------------------------------------------")
 
 if __name__ == "__main__":
