@@ -174,10 +174,14 @@ def mix_columns(state):
     return bytes(mixed)
 
 # Step 4 (for both): Add Round Key
+def add_round_key(state, key):
+    return xor_bytes(state, key)
 
 # Decryption Steps -----------------------------------------------------------------
 
 # Step 1 : Inverse Substitute Bytes
+def inv_substitute_bytes(byte_block, inv_sbox):
+    return bytes(inv_sbox[b] for b in byte_block)
 
 # Step 2 : Inverse Shift Rows
 def inv_shift_rows(state):
@@ -214,11 +218,11 @@ def aes_encrypt_block(block, key):
         state = substitute_bytes(state, sbox)
         state = shift_rows(state)
         state = mix_columns(state)
-        state = xor_bytes(state, round_keys[i])
+        state = add_round_key(state, round_keys[i])
 
     state = substitute_bytes(state, sbox)
     state = shift_rows(state)
-    state = xor_bytes(state, round_keys[-1])  # Final round (no MixColumns)
+    state = add_round_key(state, round_keys[-1])  # Final round (no MixColumns)
 
     return state
 
@@ -229,13 +233,13 @@ def aes_decrypt_block(block, key):
 
     for i in range(len(round_keys) - 2, 0, -1):
         state = inv_shift_rows(state)
-        state = substitute_bytes(state, inv_sbox)
-        state = xor_bytes(state, round_keys[i])
+        state = inv_substitute_bytes(state, inv_sbox)
+        state = add_round_key(state, round_keys[i])
         state = inv_mix_columns(state)
 
     state = inv_shift_rows(state)
     state = substitute_bytes(state, inv_sbox)
-    state = xor_bytes(state, round_keys[0])  # Final AddRoundKey
+    state = add_round_key(state, round_keys[0])  # Final AddRoundKey
 
     return state
 
