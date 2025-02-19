@@ -279,45 +279,64 @@ def display_header():
     print("RSA & AES Encryption Tool")
     print("----------------------------")
 
-def main():
-    display_header()
-
-    plaintext = input("Enter Plaintext: ")
-
-    print("\nGenerating RSA Keys...")
+def person_a():
+    print("\n[Person A] Generating RSA Keys...")
     public_key, private_key = generate_rsa_keys()
-    print(f"RSA Public Key: (e={public_key[0]}, n={public_key[1]})")
+    print(f"[Person A] RSA Public Key: (e={public_key[0]}, n={public_key[1]})")
+    print("[Person A] Share this key with Person B.")
 
-    print("\nGenerating AES Key... [Auto-Generated]")
-    aes_key = os.urandom(16)  # More reliable random bytes
+    plaintext = input("\n[Person A] Enter message to send securely: ")
+
+    print("\n[Person A] Generating AES Key... [Auto-Generated]")
+    aes_key = os.urandom(16)  # Generate a secure AES key
     iv = os.urandom(16)
 
     encrypted_aes_key = rsa_encrypt(aes_key, public_key)
-    print(f"Encrypted AES Key (RSA Encrypted): {encrypted_aes_key}")
+    encrypted_aes_key_bytes = encrypted_aes_key.to_bytes((encrypted_aes_key.bit_length() + 7) // 8, 'big')
+    print(f"[Person A] Encrypted AES Key (RSA Encrypted): {encrypted_aes_key_bytes.hex()}")
 
-    print("\nEncrypting Message using AES...")
+    print("\n[Person A] Encrypting Message using AES...")
     start_time = time.time()
     ciphertext = aes_encrypt(plaintext, aes_key, iv)
     encryption_time = time.time() - start_time
+    print(f"[Person A] Ciphertext: {ciphertext}")
 
-    print("\nDecrypting ciphertext...")
+    return encrypted_aes_key_bytes.hex(), ciphertext, iv.hex(), private_key, encryption_time  # Send to Person B
+
+def person_b(encrypted_aes_key_hex, ciphertext, iv_hex, private_key, encryption_time):
+    input("\n[Person B] Press Enter to continue after receiving data from Person A...")
+
+    encrypted_aes_key = int(encrypted_aes_key_hex, 16)
+    iv = bytes.fromhex(iv_hex)
+
+    print("\n[Person B] Decrypting AES Key...")
     start_time = time.time()
     decrypted_aes_key = rsa_decrypt(encrypted_aes_key, private_key)
 
     try:
+        print("\n[Person B] Decrypting Message using AES...")
         decrypted_text = aes_decrypt(ciphertext, decrypted_aes_key)
         decryption_time = time.time() - start_time
-        print("\nDecryption successful.")
-        print(f"Expected: \"{plaintext}\"")
-        print(f"Received: \"{decrypted_text}\"")
+
+        print("\n[Person B] Decryption successful.")
+        print(f"[Person B] Expected: \"{decrypted_text}\"")
     except Exception as e:
         decryption_time = time.time() - start_time
-        print("\nDecryption failed: Data corruption detected.")
+        print("\n[Person B] Decryption failed: Data corruption detected.")
         print(f"Error: {e}")
 
     print(f"\nEncryption Time: {encryption_time:.4f}s")
     print(f"Decryption Time: {decryption_time:.4f}s")
     print("---------------------------------------------------------")
+
+def main():
+    display_header()
+    
+    print("\n[Person A] Starting secure communication...")
+    encrypted_aes_key, ciphertext, iv, private_key, encryption_time = person_a()
+    
+    print("\n[Person B] Receiving encrypted data...")
+    person_b(encrypted_aes_key, ciphertext, iv, private_key, encryption_time)
 
 if __name__ == "__main__":
     main()
