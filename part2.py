@@ -43,7 +43,50 @@ def rsa_decrypt(ciphertext, key):
 # ----------------- Manual AES CBC Implementation ----------------- #
 BLOCK_SIZE = 16
 
-# Full AES S-Box (256 values)
+#1) Padding
+def pad(plaintext):
+    pad_length = BLOCK_SIZE - (len(plaintext) % BLOCK_SIZE)
+    return plaintext + chr(pad_length) * pad_length
+
+def unpad(padded_text):
+    pad_length = ord(padded_text[-1])
+    if pad_length > BLOCK_SIZE:
+        raise ValueError("Invalid padding detected")
+    return padded_text[:-pad_length]
+
+#2) Key Expansion
+RCON = [
+    0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36
+]
+
+def rot_word(word):
+    """Rotates a word (4 bytes) left."""
+    return word[1:] + word[:1]
+
+def sub_word(word, sbox):
+    """Applies the S-box substitution to a word (4 bytes)."""
+    return bytes(sbox[b] for b in word)
+
+def key_expansion(key):
+    """Expands the AES key into multiple round keys."""
+    key_size = len(key)
+    assert key_size in [16, 24, 32], "Invalid key size. Use 128-bit, 192-bit, or 256-bit keys."
+    
+    Nk = key_size // 4  # Number of words in the key
+    Nr = {16: 10, 24: 12, 32: 14}[key_size]  # Number of rounds
+    expanded_key = bytearray(key)
+    
+    for i in range(Nk, 4 * (Nr + 1)):
+        temp = expanded_key[-4:]
+        if i % Nk == 0:
+            temp = xor_bytes(sub_word(rot_word(temp), sbox), bytes([RCON[i//Nk-1], 0, 0, 0]))
+        elif Nk > 6 and i % Nk == 4:
+            temp = sub_word(temp, sbox)
+        expanded_key.extend(xor_bytes(expanded_key[-Nk * 4:-Nk * 4 + 4], temp))
+    
+    return [expanded_key[i:i+16] for i in range(0, len(expanded_key), 16)]
+
+# S-Box and Inverse S-Box
 sbox = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -63,28 +106,22 @@ sbox = [
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 ]
 
-# Generate Inverse S-Box correctly
 inv_sbox = [0] * 256  # Initialize list of size 256
 for i in range(256):   # Ensure all 256 values are properly mapped
     inv_sbox[sbox[i]] = i
 
-def pad(plaintext):
-    pad_length = BLOCK_SIZE - (len(plaintext) % BLOCK_SIZE)
-    return plaintext + chr(pad_length) * pad_length
-
-def unpad(padded_text):
-    pad_length = ord(padded_text[-1])
-    if pad_length > BLOCK_SIZE:
-        raise ValueError("Invalid padding detected")
-    return padded_text[:-pad_length]
-
 def xor_bytes(a, b):
     return bytes(x ^ y for x, y in zip(a, b))
 
+# The Rounds Operations -------------------------------------------------------------
+
+# Encryption Steps ------------------------------------------------------------------
+
+# Step 1: Substitute Bytes
 def substitute_bytes(byte_block, sbox):
     return bytes(sbox[b] for b in byte_block)  # Corrected to match S-Box
 
-# ShiftRows step
+# Step 2: Shift Rows
 def shift_rows(state):
     """Performs the AES ShiftRows transformation."""
     return bytes([
@@ -94,7 +131,42 @@ def shift_rows(state):
         state[12], state[1],  state[6],  state[11]   # Row 3 (shift left by 3)
     ])
 
-# Inverse ShiftRows step
+# Step 3: Mix Columns
+# Galois field multiplication helper function
+def gmul(a, b):
+    """Galois Field (GF 2^8) multiplication of two bytes."""
+    p = 0
+    for _ in range(8):
+        if b & 1:
+            p ^= a
+        carry = a & 0x80
+        a = (a << 1) & 0xFF
+        if carry:
+            a ^= 0x1B  # AES irreducible polynomial x^8 + x^4 + x^3 + x + 1
+        b >>= 1
+    return p
+
+# MixColumns transformation
+def mix_columns(state):
+    """Performs the AES MixColumns transformation."""
+    mixed = bytearray(16)
+    for i in range(4):  # Iterate over columns
+        col = state[i::4]  # Extract column
+        mixed[i::4] = [
+            gmul(col[0], 2) ^ gmul(col[1], 3) ^ col[2] ^ col[3],
+            col[0] ^ gmul(col[1], 2) ^ gmul(col[2], 3) ^ col[3],
+            col[0] ^ col[1] ^ gmul(col[2], 2) ^ gmul(col[3], 3),
+            gmul(col[0], 3) ^ col[1] ^ col[2] ^ gmul(col[3], 2)
+        ]
+    return bytes(mixed)
+
+# Step 4 (for both): Add Round Key
+
+# Decryption Steps -----------------------------------------------------------------
+
+# Step 1 : Inverse Substitute Bytes
+
+# Step 2 : Inverse Shift Rows
 def inv_shift_rows(state):
     """Performs the inverse AES ShiftRows transformation."""
     return bytes([
@@ -104,20 +176,57 @@ def inv_shift_rows(state):
         state[12], state[9],  state[6],  state[3]    # Row 3 (shift right by 3)
     ])
 
+# Step 3 : Inverse Mix Columns
+def inv_mix_columns(state):
+    """Performs the AES Inverse MixColumns transformation."""
+    mixed = bytearray(16)
+    for i in range(4):  # Iterate over columns
+        col = state[i::4]  # Extract column
+        mixed[i::4] = [
+            gmul(col[0], 14) ^ gmul(col[1], 11) ^ gmul(col[2], 13) ^ gmul(col[3], 9),
+            gmul(col[0], 9) ^ gmul(col[1], 14) ^ gmul(col[2], 11) ^ gmul(col[3], 13),
+            gmul(col[0], 13) ^ gmul(col[1], 9) ^ gmul(col[2], 14) ^ gmul(col[3], 11),
+            gmul(col[0], 11) ^ gmul(col[1], 13) ^ gmul(col[2], 9) ^ gmul(col[3], 14)
+        ]
+    return bytes(mixed)
+
+# AES Encryption and Decryption Rounds ------------------------------------------------
+
 def aes_encrypt_block(block, key):
-    """Encrypts a single 16-byte AES block with a given key."""
-    xored = xor_bytes(block, key)   # AddRoundKey
-    substituted = substitute_bytes(xored, sbox)  # SubBytes
-    shifted = shift_rows(substituted)  # ShiftRows
-    return shifted  # Missing MixColumns (should be added)
+    round_keys = key_expansion(key)
+    
+    state = xor_bytes(block, round_keys[0])  # Initial AddRoundKey
+
+    for i in range(1, len(round_keys) - 1):
+        state = substitute_bytes(state, sbox)
+        state = shift_rows(state)
+        state = mix_columns(state)
+        state = xor_bytes(state, round_keys[i])
+
+    state = substitute_bytes(state, sbox)
+    state = shift_rows(state)
+    state = xor_bytes(state, round_keys[-1])  # Final round (no MixColumns)
+
+    return state
 
 def aes_decrypt_block(block, key):
-    """Decrypts a single 16-byte AES block with a given key."""
-    reversed_shift = inv_shift_rows(block)  # Inverse ShiftRows
-    reversed_substitution = substitute_bytes(reversed_shift, inv_sbox)  # InvSubBytes
-    original_block = xor_bytes(reversed_substitution, key)  # AddRoundKey
-    return original_block  # Missing InvMixColumns (should be added)
+    round_keys = key_expansion(key)
 
+    state = xor_bytes(block, round_keys[-1])  # Initial AddRoundKey (last key)
+
+    for i in range(len(round_keys) - 2, 0, -1):
+        state = inv_shift_rows(state)
+        state = substitute_bytes(state, inv_sbox)
+        state = xor_bytes(state, round_keys[i])
+        state = inv_mix_columns(state)
+
+    state = inv_shift_rows(state)
+    state = substitute_bytes(state, inv_sbox)
+    state = xor_bytes(state, round_keys[0])  # Final AddRoundKey
+
+    return state
+
+# AES Encryption and Decryption Functions -------------------------------------------
 def aes_encrypt(plaintext, key, iv):
     plaintext = pad(plaintext)
     blocks = [plaintext[i:i+BLOCK_SIZE].encode() for i in range(0, len(plaintext), BLOCK_SIZE)]
@@ -149,9 +258,9 @@ def aes_decrypt(ciphertext, key):
 
 # ----------------- Terminal Interface ----------------- #
 def display_header():
-    print("---------------------------------------------------------")
+    print("----------------------------")
     print("RSA & AES Encryption Tool")
-    print("---------------------------------------------------------")
+    print("----------------------------")
 
 def main():
     display_header()
