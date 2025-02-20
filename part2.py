@@ -356,8 +356,42 @@ def main():
     print("\n[Person A] Starting secure communication...")
     encrypted_aes_key, ciphertext, iv, private_key, encryption_time = person_a()
     
+    print("\nWould you like to introduce a bit error during decryption?")
+    print("1. No errors (normal decryption)")
+    print("2. Introduce a single-bit error")
+    choice = input("Enter your choice (1 or 2): ")
+    
+    error = True if choice == "2" else False
+    
     print("\n[Person B] Receiving encrypted data...")
-    person_b(encrypted_aes_key, ciphertext, iv, private_key, encryption_time)
+    person_b(encrypted_aes_key, ciphertext, iv, private_key, encryption_time, error)
+
+def person_b(encrypted_aes_key_hex, ciphertext, iv_hex, private_key, encryption_time, error):
+    input("\n[Person B] Press Enter to continue after receiving data from Person A...")
+
+    encrypted_aes_key = int(encrypted_aes_key_hex, 16)
+    iv = bytes.fromhex(iv_hex)
+
+    print("\n[Person B] Decrypting AES Key...")
+    start_time = time.time()
+    decrypted_aes_key = rsa_decrypt(encrypted_aes_key, private_key)
+
+    try:
+        print("\n[Person B] Decrypting Message using AES...")
+        decrypted_text = aes_decrypt(ciphertext, decrypted_aes_key, error=error)
+        decryption_time = time.time() - start_time
+
+        print("\n[Person B] Decryption successful.")
+        print(f"[Person B] Expected: \"{decrypted_text}\"")
+    
+    except Exception as e:
+        decryption_time = time.time() - start_time
+        print("\n[Person B] Decryption failed: Data corruption detected.")
+        print(f"Error: {e}")
+
+    print(f"\nEncryption Time: {encryption_time:.4f}s")
+    print(f"Decryption Time: {decryption_time:.4f}s")
+    print("---------------------------------------------------------")
 
 if __name__ == "__main__":
     main()
