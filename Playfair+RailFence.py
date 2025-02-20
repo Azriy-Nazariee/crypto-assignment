@@ -1,3 +1,5 @@
+
+## ------------------Playfair---------------- ##
 class Playfair:
     alphabet = ['a','b','c','d','e','f','g','h','i','k','l','m',
                 'n','o','p','q','r','s','t','u','v','w','x','y','z']
@@ -81,6 +83,7 @@ class Playfair:
         digrams = self.digrams(encrypted)
         return ''.join(self.playfair_decrypt(digram) for digram in digrams)
 
+## ------------------RailFence---------------- ##
 
 def rail_fence_encrypt(text, depth):
     rails = [[] for _ in range(depth)]
@@ -119,6 +122,7 @@ def rail_fence_decrypt(ciphertext, depth):
     return ''.join(plaintext)
 
 
+## ------------------Combined---------------- ##
 def encrypt_combined(plaintext, key, depth):
     playfair = Playfair(key)
     playfair_encrypted = playfair.encrypt(plaintext)
