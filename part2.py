@@ -257,18 +257,36 @@ def aes_encrypt(plaintext, key, iv):
 
     return base64.b64encode(iv + b''.join(encrypted_blocks)).decode()
 
-def aes_decrypt(ciphertext, key):
+def aes_decrypt(ciphertext, key , error = False):
     raw_data = base64.b64decode(ciphertext)
     iv, encrypted_blocks = raw_data[:BLOCK_SIZE], raw_data[BLOCK_SIZE:]
     decrypted_blocks = []
     prev_block = iv
 
+    middle_block_index = int((len(encrypted_blocks) /BLOCK_SIZE)// 2)
+
     for i in range(0, len(encrypted_blocks), BLOCK_SIZE):
         block = encrypted_blocks[i:i+BLOCK_SIZE]
+    
+       # Introduce a single-bit corruption if error=True
+        if error and (i == middle_block_index*16):
+            print("Corrupting block...")
+            cor_block = bytearray(block)
+            cor_block[0] ^= 0b00000001  # Flip the least significant bit of the first byte
+            block = bytes(cor_block)
+
         decrypted_block = aes_decrypt_block(block, key)
         original_block = xor_bytes(decrypted_block, prev_block)
         decrypted_blocks.append(original_block)
         prev_block = block
+
+    try:
+        decrypted = unpad(b''.join(decrypted_blocks).decode())
+        print("No Error - Raw Blocks : " ,list(decrypted_blocks))
+        return decrypted 
+    except UnicodeDecodeError as e:
+        print("Decryption successful after bit corruption, but text is not valid UTF-8.")
+        return list(decrypted_blocks)  # Return raw bytes instead to bypass utf-8 decode
 
     return unpad(b''.join(decrypted_blocks).decode())
 
@@ -314,11 +332,15 @@ def person_b(encrypted_aes_key_hex, ciphertext, iv_hex, private_key, encryption_
 
     try:
         print("\n[Person B] Decrypting Message using AES...")
-        decrypted_text = aes_decrypt(ciphertext, decrypted_aes_key)
+        decrypted_text = aes_decrypt(ciphertext, decrypted_aes_key, error= False)
+        decrypted_corrupted  = aes_decrypt(ciphertext, decrypted_aes_key, error= True)
+        
         decryption_time = time.time() - start_time
 
         print("\n[Person B] Decryption successful.")
         print(f"[Person B] Expected: \"{decrypted_text}\"")
+        print(f"[Person B] Corrupted Raw Blocks: \"{decrypted_corrupted}\"")
+        
     except Exception as e:
         decryption_time = time.time() - start_time
         print("\n[Person B] Decryption failed: Data corruption detected.")
